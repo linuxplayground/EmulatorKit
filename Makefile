@@ -13,7 +13,8 @@ all: $(BINS)
 
 sdl2:	rc2014_sdl2 nc100 nc200 n8_sdl2 scelbi_sdl2 nascom uk101 \
 	z180-mini-itx_sdl2 vz300 2063_sdl2 rcbus-8085_sdl2 max80 \
-	sorceror z80all osi400 osi500 spectrum microtan
+	sorceror z80all osi400 osi500 spectrum microtan \
+	6502retro
 
 libz80/libz80.o:
 	$(MAKE) --directory libz80
@@ -255,8 +256,11 @@ nabupc_sdl2: nabupc.o nabupc_sdlui.o ide.o tms9918a.o tms9918a_sdl2.o z80dis.o l
 z80retro: z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o
 	cc -g3 z80retro.o i2c_bitbang.o i2c_ds1307.o sdcard.o z80dis.o libz80/libz80.o -lm -o z80retro
 
-2063: 2063.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
+2063:          2063.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o
 	cc -g3 2063.o 2063_noui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_norender.o nojoystick.o z80dis.o libz80/libz80.o -lm -o 2063
+
+6502retro:     6502retro.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502.o 6502dis.o
+	cc -g3 6502retro.o ttycon.o 6551.o 6522.o sdcard.o tms9918a.o tms9918a_sdl2.o 6502.o 6502dis.o -lSDL2 -o 6502retro
 
 2063_sdl2: 2063.o 2063_sdlui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o
 	cc -g3 2063.o 2063_sdlui.o sdcard.o 16x50.o ttycon.o tms9918a.o tms9918a_sdl2.o joystick.o z80dis.o libz80/libz80.o -lm -o 2063_sdl2 -lSDL2
