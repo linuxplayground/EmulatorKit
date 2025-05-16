@@ -13,6 +13,8 @@ extern void via_trace(struct via6522 *via, int onoff);
 extern int via_irq_pending(struct via6522 *via);
 extern uint8_t via_get_direction_a(struct via6522 *via);
 extern uint8_t via_get_port_a(struct via6522 *via);
+extern void via_set_cb1(struct via6522 *via, uint8_t val);
+extern void via_set_cb2(struct via6522 *via, uint8_t val);
 extern void via_set_port_a(struct via6522 *via, uint8_t val);
 extern uint8_t via_get_direction_b(struct via6522 *via);
 extern uint8_t via_get_port_b(struct via6522 *via);

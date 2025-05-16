@@ -1,22 +1,22 @@
 /* vim: set ts=8 sw=8 et: */
-
 #include <stdio.h>
-#include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <termios.h>
-#include <time.h>
-#include <unistd.h>
-#include <sys/mman.h>
+#include <glob.h>
+#include <sys/types.h>
 #include <sys/stat.h>
-
+#include <fcntl.h>
+#include <unistd.h>
+#include <poll.h>
+#include <stdarg.h>
+#include <termios.h>
+#include <signal.h>
+#include <time.h>
 #include <SDL2/SDL.h>
 
-#include "6502.h"
 #include "serialdevice.h"
 #include "ttycon.h"
+#include "6502.h"
 #include "6522.h"
 #include "6551.h"
 #include "sdcard.h"
@@ -30,13 +30,14 @@
 #define TRACE_SD        0x000010
 #define TRACE_SPI       0x000020
 #define TRACE_TMS9918A  0x000040
-#define TRACE_VIA       0x000060
+#define TRACE_VIA       0x000080
 
 #define SD_CLK          0x01
 #define SD_CS           0x02
 #define ROM_SWITCH      0x40
 #define SD_MOSI         0x80
 
+static struct serial_device *con;
 static struct termios saved_term, term;
 
 static struct sdcard *sdcard;
@@ -57,8 +58,6 @@ static int trace = 0;
 static uint8_t ram[0x10000];
 static uint8_t paged_ram[64 * 0x2000];
 static uint8_t rom[0x2000];
-
-static void spi_clock_high();
 
 uint8_t do_read_6502(uint16_t addr, unsigned debug)
 {
@@ -132,21 +131,6 @@ void write6502(uint16_t addr, uint8_t val)
 
         if (via1 && (addr & 0xFFF0) == 0xBF20)
         {
-                if (addr == 0xBF21)             // via port a
-                {
-                        if (!(val & SD_CS))             // SD_CS is asserted
-                        {
-                                if ((val & SD_CLK) && (old_spi_clk == 0))    // Clock is high and old clock was low
-                                {
-                                        old_spi_clk = 1;
-                                        spi_clock_high();
-                                }
-                                else if (!(val & SD_CLK) && (old_spi_clk == 1)) // clock is low and old clock was high
-                                {
-                                        old_spi_clk = 0;
-                                }
-                        }
-                }
                 // we want to make sure that ROM_SWITCH is pulled up when setting the direction to input.
                 if ((addr == 0xBF23) && ((val & ROM_SWITCH) == 0))
                 {
@@ -182,7 +166,52 @@ void recalc_interrupts(void)
 
 void via_recalc_outputs(struct via6522 *via)
 {
+        static unsigned opa;
+        static unsigned bitcount;
+        static uint8_t rxbyte, txbyte;
+
+        unsigned delta;
+        unsigned pa = via_get_port_a(via1);
+
+        delta = opa ^ pa;
+        opa = pa;
+
+        /* Ok what happened */
+        if (delta & SD_CS) {
+                fprintf(stderr, "CS: %d, CLK: %d, PA: %02x\n", pa & SD_CS, pa & SD_CLK, pa);
+                if (pa & SD_CS)
+                {
+                        sd_spi_lower_cs(sdcard);
+                        if (pa & SD_CLK) {
+                                /* Clock goes high. Sample */
+                                uint8_t bit = 0;
+                                bit |= (pa & SD_MOSI) >> 7;
+
+                                txbyte <<= 1;
+                                txbyte |= bit;
+                                bitcount++;
+                                via_set_cb2(via1, bit);
+                                via_set_cb1(via1, 1);
+                                if (bitcount == 8) {
+                                        rxbyte = sd_spi_in(sdcard, txbyte);
+                                        if (trace & TRACE_SD)
+                                                fprintf(stderr, "sd: %02X -> %02X\n",
+                                                                txbyte, rxbyte);
+                                        bitcount = 0;
+                                }
+                                else
+                                {
+                                        via_set_cb1(via1, 0);
+                                }
+                        }
+                }
+                else {
+                        sd_spi_raise_cs(sdcard);
+                        bitcount = 0;
+                }
+        }
 }
+
 
 void via_handshake_a(struct via6522 *via)
 {
@@ -190,24 +219,6 @@ void via_handshake_a(struct via6522 *via)
 
 void via_handshake_b(struct via6522 *via)
 {
-}
-
-static uint8_t bitcnt;
-static uint8_t txbits, rxbits;
-
-static void spi_clock_high(void)
-{
-        return;
-        txbits <<=1;
-        txbits |= (via_get_port_a(via1) & 0x7F) >> 7; // Gather MOSI and send it to sdcard after 8th bit
-        bitcnt++;
-        if (bitcnt == 8) {
-                rxbits = sd_spi_in(sdcard, txbits);
-                via_write(via1,10, rxbits);           // Just save the received bits in via->sr so the bios can collect
-                if (trace & TRACE_SPI)
-                        fprintf(stderr, "spi %02X | %02X\n", rxbits, txbits);
-                bitcnt = 0;
-        }
 }
 
 static int romload(const char *path, uint8_t *mem, unsigned int maxsize)
@@ -235,6 +246,24 @@ static void exit_cleanup(void)
         tcsetattr(0, TCSADRAIN, &saved_term);
 }
 
+void termon(void)
+{
+    if (tcgetattr(0, &term) == 0) {
+        saved_term = term;
+        atexit(exit_cleanup);
+        signal(SIGINT, cleanup);
+        signal(SIGQUIT, cleanup);
+        signal(SIGPIPE, cleanup);
+        term.c_lflag &= ~(ICANON | ECHO);
+        term.c_cc[VMIN] = 0;
+        term.c_cc[VTIME] = 1;
+        term.c_cc[VINTR] = 0;
+        term.c_cc[VSUSP] = 0;
+        term.c_cc[VSTOP] = 0;
+        tcsetattr(0, TCSADRAIN, &term);
+    }
+
+}
 static void irqnotify(void)
 {
         if (via1 && via_irq_pending(via1))
@@ -302,12 +331,13 @@ int main(int argc, char *argv[])
                         exit(1);
                 }
                 sd_attach(sdcard, fd);
-                via_write(via1, 1, via_pa);       /* init LED OFF, ROM SWITCH ON, other active lows disabled */
+                via_write(via1, 1, via_pa);     /* init LED OFF, ROM SWITCH ON, other active lows disabled */
                 via_write(via1, 3, 0xD7);       /* PA5 and PA3 are inputs */
         }
 
         if (trace & TRACE_SD)
                 sd_trace(sdcard, 1);
+
         sd_blockmode(sdcard);
 
         if (have_tms) {
@@ -321,24 +351,12 @@ int main(int argc, char *argv[])
         tc.tv_sec = 0;
         tc.tv_nsec = 16666667L;
 
-        if (tcgetattr(0, &term) == 0) {
-                saved_term = term;
-                atexit(exit_cleanup);
-                signal(SIGINT, cleanup);
-                signal(SIGQUIT, cleanup);
-                signal(SIGPIPE, cleanup);
-                term.c_lflag &= ~(ICANON | ECHO);
-                term.c_cc[VMIN] = 0;
-                term.c_cc[VTIME] = 1;
-                term.c_cc[VINTR] = 0;
-                term.c_cc[VSUSP] = 0;
-                term.c_cc[VSTOP] = 0;
-                tcsetattr(0, TCSADRAIN, &term);
-        }
+        termon();
 
+        con = &console;
         uart = m6551_create();
         m6551_trace(uart, trace & TRACE_6551);
-        m6551_attach(uart, &console);
+        m6551_attach(uart, con);
 
 
         if (trace & TRACE_CPU)
@@ -367,10 +385,13 @@ int main(int argc, char *argv[])
                         tms9918a_render(vdprend);
                 }
 
-                m6551_timer(uart);
+                if (uart)
+                        m6551_timer(uart);
+
                 if (!fast)
                         nanosleep(&tc, NULL);
         }
+
         exit(0);
 }
 

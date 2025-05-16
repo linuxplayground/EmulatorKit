@@ -130,7 +130,9 @@ void m6551_attach(struct m6551 *m6551, struct serial_device *dev)
 
 void m6551_reset(struct m6551 *m6551)
 {
+	struct serial_device *olddev = m6551->dev;		// keep the pointer to the device
 	memset(m6551, 0, sizeof(struct m6551));
+	m6551->dev = olddev;					// restore it again.
 	m6551->cmd = 2;
 	m6551->status = 0x10;
 	m6551_irq_compute(m6551);

@@ -3,7 +3,7 @@
 *.swp
 *.BIN
 my.cf
-
+6502retro
 lib765/lib/lib765.a
 *.dSYM
 flexbox

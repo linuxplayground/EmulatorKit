@@ -35,7 +35,7 @@
 #include <errno.h>
 
 #define VERSION_INFO "v2.1"
-#define NUMBER_OPCODES 151
+#define NUMBER_OPCODES 160
 
 struct symbol {
     struct symbol *next;
@@ -171,6 +171,8 @@ static opcode_t opcodes[NUMBER_OPCODES] = {
 
     {0xD0, "BNE", RELAT, 2, CYCLES_CROSS_PAGE_ADDS_ONE | CYCLES_BRANCH_TAKEN_ADDS_ONE}, /* BNE */
 
+    {0x80, "BRA", RELAT, 2, CYCLES_CROSS_PAGE_ADDS_ONE | CYCLES_BRANCH_TAKEN_ADDS_ONE}, /* BRA */
+
     {0x10, "BPL", RELAT, 2, CYCLES_CROSS_PAGE_ADDS_ONE | CYCLES_BRANCH_TAKEN_ADDS_ONE}, /* BPL */
 
     {0x00, "BRK", IMPLI, 7, 0}, /* BRK */
@@ -275,10 +277,14 @@ static opcode_t opcodes[NUMBER_OPCODES] = {
     {0x11, "ORA", ININD, 5, CYCLES_CROSS_PAGE_ADDS_ONE},
 
     {0x48, "PHA", IMPLI, 3, 0}, /* PHA */
+    {0xDA, "PHX", IMPLI, 3, 0}, /* PHX */
+    {0x5A, "PHY", IMPLI, 3, 0}, /* PHY */
 
     {0x08, "PHP", IMPLI, 3, 0}, /* PHP */
 
     {0x68, "PLA", IMPLI, 4, 0}, /* PLA */
+    {0x7A, "PLY", IMPLI, 4, 0}, /* PLA */
+    {0xFA, "PLX", IMPLI, 4, 0}, /* PLA */
 
     {0x28, "PLP", IMPLI, 4, 0}, /* PLP */
 
@@ -320,6 +326,11 @@ static opcode_t opcodes[NUMBER_OPCODES] = {
     {0x99, "STA", ABSIY, 4, CYCLES_CROSS_PAGE_ADDS_ONE},
     {0x81, "STA", INDIN, 6, 0},
     {0x91, "STA", ININD, 5, CYCLES_CROSS_PAGE_ADDS_ONE},
+
+    {0x64, "STZ", ZEROP, 3, 0}, /* STZ */
+    {0x74, "STZ", ZEPIX, 4, 0},
+    {0x9C, "STZ", ABSOL, 4, 0},
+    {0x9E, "STZ", ABSIX, 5, 0},
 
     {0x86, "STX", ZEROP, 3, 0}, /* STX */
     {0x96, "STX", ZEPIY, 4, 0},

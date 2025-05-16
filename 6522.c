@@ -1,3 +1,4 @@
+// vim: set ts=4 sw=4:
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -27,8 +28,11 @@ struct via6522 {
 	uint16_t t2;
 	uint8_t t2l;
 	/* Pin states rather than registers */
-	uint8_t ca;
-	uint8_t cb;
+	uint8_t ca1;
+	uint8_t ca2;
+
+	uint8_t cb1;
+	uint8_t cb2;
 
 	unsigned int trace;
 };
@@ -271,6 +275,20 @@ uint8_t via_get_port_a(struct via6522 *via)
 void via_set_port_a(struct via6522 *via, uint8_t val)
 {
     via->ira = val;
+}
+
+void via_set_cb1(struct via6522 *via, uint8_t val)
+{
+	via->cb1 = val;
+	if ((via->acr & 0x1c) == 0x1c)
+	{
+		via->sr <<= via->cb2;
+	}
+}
+
+void via_set_cb2(struct via6522 *via, uint8_t val)
+{
+    via->cb2 = val;
 }
 
 uint8_t via_get_direction_b(struct via6522 *via)

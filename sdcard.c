@@ -91,8 +91,8 @@ static uint8_t sd_process_command(struct sdcard *c)
 	case 0x40+9:		/* CMD 9 - read the CSD */
 		if (c->block)
 			memcpy(c->sd_out,sdhc_csd, 17);
-        else
-            memcpy(c->sd_out,sd_csd, 17);
+		else
+			memcpy(c->sd_out,sd_csd, 17);
 		c->sd_outlen = 17;
 		c->sd_outp = 0;
 		c->sd_mode = 2;
@@ -187,12 +187,16 @@ static uint8_t sd_card_byte(struct sdcard *c, uint8_t in)
 {
 	/* No card present */
 	if (c->sd_fd == -1)
+	{
 		return 0xFF;
+	}
 
 	/* Stuffing on commands */
 	if (c->sd_stuff) {
 		if (--c->sd_stuff)
+		{
 			return 0xFF;
+		}
 		return c->sd_poststuff;
 	}
 
@@ -258,7 +262,11 @@ void sd_spi_lower_cs(struct sdcard *c)
 uint8_t sd_spi_in(struct sdcard *c, uint8_t v)
 {
 	if (c->sd_cs)
+	{
+		fprintf(stderr, "BAILING OUT - BAILING OUT - BAILING OUT - ");
 		return 0xFF;
+	}
+
 	return sd_card_byte(c, v);
 }
 
@@ -298,6 +306,7 @@ struct sdcard *sd_create(const char *name)
 	c->sd_name = name;
 	c->sd_fd = -1;
 	sd_reset(c);
+	c->debug = 1;
 	return c;
 }
 
