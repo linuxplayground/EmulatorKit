@@ -16,26 +16,26 @@
 
 #include "serialdevice.h"
 #include "ttycon.h"
-#include "6502.h"
+#include "fake65c02.h"
 #include "6522.h"
 #include "6551.h"
 #include "sdcard.h"
 #include "tms9918a.h"
 #include "tms9918a_render.h"
 
-#define TRACE_MEM       0x000001
-#define TRACE_IRQ       0x000002
-#define TRACE_CPU       0x000004
-#define TRACE_6551      0x000008
-#define TRACE_SD        0x000010
-#define TRACE_SPI       0x000020
-#define TRACE_TMS9918A  0x000040
-#define TRACE_VIA       0x000080
+#define TRACE_MEM       1
+#define TRACE_IRQ       2
+#define TRACE_CPU       4
+#define TRACE_6551      8
+#define TRACE_SD        16
+#define TRACE_SPI       32
+#define TRACE_TMS9918A  64
+#define TRACE_VIA       128
 
-#define SD_CLK          0x01
-#define SD_CS           0x02
-#define ROM_SWITCH      0x40
-#define SD_MOSI         0x80
+#define SD_CLK          1 << 0
+#define SD_CS           1 << 1
+#define ROM_SWITCH      1 << 6
+#define SD_MOSI         1 << 7
 
 static struct serial_device *con;
 static struct termios saved_term, term;
@@ -161,55 +161,74 @@ void write6502(uint16_t addr, uint8_t val)
 /* We do this in the 6502 loop instead. Provide a dummy for the device models */
 void recalc_interrupts(void)
 {
-
 }
+
 
 void via_recalc_outputs(struct via6522 *via)
 {
-        static unsigned opa;
-        static unsigned bitcount;
-        static uint8_t rxbyte, txbyte;
+        uint8_t port = via_get_port_a(via);
 
-        unsigned delta;
-        unsigned pa = via_get_port_a(via1);
+        bool clk = port & 1;
+        bool is_sdcard = !((port >> 1) & 1);
+        bool mosi = port >> 7;
 
-        delta = opa ^ pa;
-        opa = pa;
+        if (trace & TRACE_SPI)
+                fprintf(stderr, "SPI: sdcs=%d, sdclk=%d, mosi=%d\n", is_sdcard, clk, mosi);
 
-        /* Ok what happened */
-        if (delta & SD_CS) {
-                fprintf(stderr, "CS: %d, CLK: %d, PA: %02x\n", pa & SD_CS, pa & SD_CLK, pa);
-                if (pa & SD_CS)
-                {
-                        sd_spi_lower_cs(sdcard);
-                        if (pa & SD_CLK) {
-                                /* Clock goes high. Sample */
-                                uint8_t bit = 0;
-                                bit |= (pa & SD_MOSI) >> 7;
+        static bool last_sdcard;
+        static uint8_t bit_counter = 0;
+        if (!last_sdcard && is_sdcard) {
+                bit_counter = 0;
+                sd_spi_lower_cs(sdcard);
+        }
+        last_sdcard = is_sdcard;
 
-                                txbyte <<= 1;
-                                txbyte |= bit;
-                                bitcount++;
-                                via_set_cb2(via1, bit);
-                                via_set_cb1(via1, 1);
-                                if (bitcount == 8) {
-                                        rxbyte = sd_spi_in(sdcard, txbyte);
-                                        if (trace & TRACE_SD)
-                                                fprintf(stderr, "sd: %02X -> %02X\n",
-                                                                txbyte, rxbyte);
-                                        bitcount = 0;
-                                }
-                                else
-                                {
-                                        via_set_cb1(via1, 0);
-                                }
+        static int init_counter = 0;
+        static bool initialized = false;
+        // For initialization, the client has to pull&release CLK 74 times.
+        // The SD card should be deselected, because it's not actual
+        // data transmission (we ignore this).
+        if (!initialized) { // TODO FIXME move to sdcard.c
+                if (clk) {
+                        init_counter++;
+                        if (init_counter >= 74) {
+                                sd_spi_lower_cs(sdcard);
+                                initialized = true;
                         }
                 }
-                else {
-                        sd_spi_raise_cs(sdcard);
-                        bitcount = 0;
-                }
+                return;
         }
+
+        if (!is_sdcard) {
+                return;
+        }
+        static bool last_clk = false;
+        if (clk == last_clk) {
+                return;
+        }
+        last_clk = clk;
+        if (!clk) {     // only care about rising clock
+                return;
+        }
+
+        static uint8_t inbyte, outbyte;
+        inbyte <<= 1;
+        inbyte |= mosi;
+        bit_counter++;
+
+
+        if (bit_counter != 8) {
+                return;
+        }
+
+        bit_counter = 0;
+
+        if (is_sdcard) {
+                outbyte = sd_spi_in(sdcard, inbyte);
+                if (trace & TRACE_SPI)
+                        fprintf(stderr, "SDSPI: %02X -> %02X\n", inbyte, outbyte);
+        }
+        via_write(via, 10, outbyte);
 }
 
 
@@ -244,6 +263,7 @@ static void cleanup(int sig)
 static void exit_cleanup(void)
 {
         tcsetattr(0, TCSADRAIN, &saved_term);
+        SDL_Quit();
 }
 
 void termon(void)
@@ -270,11 +290,25 @@ static void irqnotify(void)
                 irq6502();
         else if (uart && m6551_irq_pending(uart))
                 irq6502();
+        else if (vdp && tms9918a_irq_pending(vdp))
+                irq6502();
 }
 
+void ui_event(void)
+{
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev)) {
+                switch(ev.type) {
+                        case SDL_QUIT:
+                                emulator_done = 1;
+                                break;
+                        }
+        }
+}
 static void usage(void)
 {
         fprintf(stderr, "6502retro: [-1] [-r rompath] [-S sdcard] [-T] [-f] [-d debug]\n");
+        exit_cleanup();
         exit(EXIT_FAILURE);
 }
 
@@ -286,7 +320,7 @@ int main(int argc, char *argv[])
         char *rompath = "6502retro.rom";
         char *sdpath = NULL;
         unsigned have_tms = 0;
-        static int tstates = 100;      /* 1MHz */
+        static int tstates = 4000;      /* 1MHz */
 
         while ((opt = getopt(argc, argv, "d:fr:S:T")) != -1) {
                 switch (opt) {
@@ -349,7 +383,7 @@ int main(int argc, char *argv[])
 
         /* 60Hz for the VDP */
         tc.tv_sec = 0;
-        tc.tv_nsec = 16666667L;
+        tc.tv_nsec = 12500000L;
 
         termon();
 
@@ -359,10 +393,9 @@ int main(int argc, char *argv[])
         m6551_attach(uart, con);
 
 
-        if (trace & TRACE_CPU)
-                log_6502 = 1;
+        //if (trace & TRACE_CPU)
+        //        log_6502 = 1;
 
-        init6502();
         hookexternal(irqnotify);
         reset6502();
 
@@ -377,8 +410,8 @@ int main(int argc, char *argv[])
                 for (i = 0; i < 10; i++) {
                         exec6502(tstates);
                         via_tick(via1, tstates);
-
                 }
+                ui_event();
                 /* Do 20ms of I/O and delays */
                 if (vdp) {
                         tms9918a_rasterize(vdp);

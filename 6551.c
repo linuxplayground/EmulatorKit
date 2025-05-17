@@ -22,14 +22,21 @@ struct m6551 {
 static void m6551_irq_compute(struct m6551 *m6551)
 {
 	unsigned oi = m6551->inint;
+	//reset IRQB (bit7)
 	m6551->status &= ~0x80;
 
+	// if receiver data register is full then set IRQB
 	if (m6551->status & 0x08)
 		m6551->status |= 0x80;
+	// if transmit data register is empty
+	// AND transmit interrupt control == 0 1 (RTSB = Low, transmit interrupt enabled
+	// then set IRQB
 	if ((m6551->status & 0x10) && (m6551->cmd & 0x0C) == 0x04)
 		m6551->status |= 0x80;
+	// if IRQB is now set, and receiver clock is on.???
+	//if ((m6551->status & 0x80) && (m6551->ctrl & 0x10)) //bit 4 of the ctrl register is to do with receiver clock
 
-	if ((m6551->status & 0x80) && (m6551->ctrl & 0x10))
+	if ((m6551->status & 0x80) && (m6551->cmd & 0x10))    //I think this should be the cmd register. (dave latham)
 		m6551->inint = 1;
 	else
 		m6551->inint = 0;
@@ -75,7 +82,7 @@ void m6551_timer(struct m6551 *m6551)
 uint8_t m6551_read(struct m6551 *m6551, uint16_t addr)
 {
 	if (m6551->trace)
-		fprintf(stderr, "m6551_read %d ", addr);
+		fprintf(stderr, "m6551_read %d\n", addr);
 	switch (addr & 3) {
 	case 0:
 		m6551->status &= ~0x0F;
@@ -130,11 +137,8 @@ void m6551_attach(struct m6551 *m6551, struct serial_device *dev)
 
 void m6551_reset(struct m6551 *m6551)
 {
-	struct serial_device *olddev = m6551->dev;		// keep the pointer to the device
-	memset(m6551, 0, sizeof(struct m6551));
-	m6551->dev = olddev;					// restore it again.
-	m6551->cmd = 2;
-	m6551->status = 0x10;
+	m6551->cmd |= 0x1f;
+	m6551->status |= 4;
 	m6551_irq_compute(m6551);
 }
 
@@ -150,7 +154,7 @@ struct m6551 *m6551_create(void)
 		fprintf(stderr, "Out of memory.\n");
 		exit(1);
 	}
-	m6551_reset(m6551);
+	memset(m6551, 0, sizeof(struct m6551));
 	return m6551;
 }
 

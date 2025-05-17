@@ -188,6 +188,7 @@ static uint8_t sd_card_byte(struct sdcard *c, uint8_t in)
 	/* No card present */
 	if (c->sd_fd == -1)
 	{
+		//fprintf(stderr, "sdcard: sdcard not present!\n");
 		return 0xFF;
 	}
 
@@ -195,6 +196,7 @@ static uint8_t sd_card_byte(struct sdcard *c, uint8_t in)
 	if (c->sd_stuff) {
 		if (--c->sd_stuff)
 		{
+			//fprintf(stderr, "sdcard: stuffing commands!\n");
 			return 0xFF;
 		}
 		return c->sd_poststuff;
@@ -206,6 +208,8 @@ static uint8_t sd_card_byte(struct sdcard *c, uint8_t in)
 			c->sd_cmdp = 1;
 			c->sd_cmd[0] = in;
 		}
+
+		//fprintf(stderr, "sdcard: mode0 response! [%02x]\n", in);
 		return 0xFF;
 	}
 	if (c->sd_mode == 1) {
@@ -216,6 +220,7 @@ static uint8_t sd_card_byte(struct sdcard *c, uint8_t in)
 			/* Reply with either a stuff byte (CMD12) or a
 			   status */
 			c->sd_poststuff = sd_process_command(c);
+			//fprintf(stderr, "sdcard: post stuff error response!\n");
 			return 0xFF;
 		}
 		/* Keep talking */
@@ -233,6 +238,7 @@ static uint8_t sd_card_byte(struct sdcard *c, uint8_t in)
 		if (c->sd_inp == c->sd_inlen)
 			return sd_process_data(c);
 		/* Keep sending */
+		//fprintf(stderr, "sdcard: keep sending!\n");
 		return 0xFF;
 	}
 	/* Sync up before data flow starts */
@@ -240,6 +246,8 @@ static uint8_t sd_card_byte(struct sdcard *c, uint8_t in)
 		/* Sync */
 		if (in == 0xFE)
 			c->sd_mode = 3;
+
+		//fprintf(stderr, "sdcard: sd mode 4 response!\n");
 		return 0xFF;
 	}
 	return 0xFF;
@@ -263,7 +271,7 @@ uint8_t sd_spi_in(struct sdcard *c, uint8_t v)
 {
 	if (c->sd_cs)
 	{
-		fprintf(stderr, "BAILING OUT - BAILING OUT - BAILING OUT - ");
+		fprintf(stderr, "sdcard: CS is not asserted!\n");
 		return 0xFF;
 	}
 
@@ -306,7 +314,6 @@ struct sdcard *sd_create(const char *name)
 	c->sd_name = name;
 	c->sd_fd = -1;
 	sd_reset(c);
-	c->debug = 1;
 	return c;
 }
 
